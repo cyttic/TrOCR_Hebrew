@@ -1,0 +1,17 @@
+# model weights and checkpoints
+trocr-hebrew-untrained/
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+
+# training output
+runs/
+checkpoints/
+output/
+
+# cache
+__pycache__/
+*.pyc
+.cache/
