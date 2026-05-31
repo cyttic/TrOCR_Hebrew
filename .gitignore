@@ -1,3 +1,6 @@
+# dataset
+dataset/
+
 # model weights and checkpoints
 trocr-hebrew-untrained/
 *.bin
@@ -5,6 +8,11 @@ trocr-hebrew-untrained/
 *.pt
 *.pth
 *.ckpt
+
+# corpus
+hebrew_words.pickle
+hebrew_words_raw.tar.gz
+heb_wikipedia_2021_1M/
 
 # training output
 runs/
@@ -15,3 +23,4 @@ output/
 __pycache__/
 *.pyc
 .cache/
+.venv/
