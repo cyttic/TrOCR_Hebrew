@@ -27,6 +27,7 @@ import os
 import argparse
 
 import torch
+import numpy as np
 import jiwer
 from datasets import load_dataset
 from transformers import (
@@ -65,7 +66,9 @@ def build_metrics(tokenizer):
     def compute_metrics(pred):
         pred_ids  = pred.predictions
         label_ids = pred.label_ids
-        label_ids[label_ids == -100] = tokenizer.pad_token_id
+        # generated preds AND labels can hold -100 padding -> invalid for decode
+        pred_ids  = np.where(pred_ids  < 0, tokenizer.pad_token_id, pred_ids)
+        label_ids = np.where(label_ids < 0, tokenizer.pad_token_id, label_ids)
 
         pred_str  = tokenizer.batch_decode(pred_ids,  skip_special_tokens=True)
         label_str = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
@@ -84,6 +87,13 @@ def main(args):
     model = VisionEncoderDecoderModel.from_pretrained(args.model)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     processor = HebrewBlockProcessor()
+
+    # generation_config takes priority over model.config in recent transformers,
+    # so the special tokens must be set on it explicitly or generate() fails.
+    model.generation_config.decoder_start_token_id = tokenizer.cls_token_id
+    model.generation_config.pad_token_id = tokenizer.pad_token_id
+    model.generation_config.eos_token_id = tokenizer.sep_token_id
+    model.generation_config.max_new_tokens = None   # use max_length; silences the warning
 
     if args.encoder_frozen:
         for p in model.encoder.parameters():
@@ -122,6 +132,7 @@ def main(args):
         metric_for_best_model="cer",
         greater_is_better=False,
         dataloader_num_workers=args.num_workers,
+        remove_unused_columns=False,   # keep image/text for the custom collator
         report_to="none",
     )
 
