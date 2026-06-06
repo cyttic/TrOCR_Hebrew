@@ -32,11 +32,13 @@ Hub as **`cyttic/trocr-hebrew-untrained`**.
 | `build_hebrew_trocr.py` | Builds the encoder+decoder model + processor, saves to `trocr-hebrew-untrained/` |
 | `block_processor.py` | `HebrewBlockProcessor` — custom image preprocessing (mirror + tile) |
 | `prepare_dataset.py` | SCE dataset (TIF + JSON quads) → `dataset/human/{images,labels.tsv}` |
-| `generate_synthetic.py` | Renders ~1M synthetic Hebrew line images → `dataset/syntetic/` (note spelling) |
-| `split_dataset.py` | **Document-level** train/test split → `dataset/human_split/{train,test}/` |
-| `to_parquet.py` | Split dirs → `dataset/human_parquet/{train,test}-00000-of-00001.parquet` |
+| `generate_synthetic.py` | Renders synthetic Hebrew line images → `dataset/syntetic/` (note spelling). Clean render only — no aug. `--count`, `--random`, `--seed` |
+| `split_dataset.py` | **Document-level** train/test split of the human set → `dataset/human_split/{train,test}/` |
+| `split_synthetic.py` | **Per-line** train/test split of the synthetic set → `dataset/syntetic_split/{train,test}/` (leak-free: source has 0 duplicate lines). `--test-frac`, `--seed`, `--move` |
+| `to_parquet.py` | Split dirs → parquet. Flags: `--split-dir`, `--out-dir`, `--shard-size`, `--source-doc`. Default = human; synthetic = no `source_doc`, larger shards |
 | `train.py` | Fine-tune (Seq2SeqTrainer); CLI flags below |
-| `train_trocr_hebrew.ipynb` | Interactive/visual version of `train.py` |
+| `train_trocr_hebrew.ipynb` | Stage 2: human finetune (interactive version of `train.py`) |
+| `train_trocr_synthetic.ipynb` | Stage 1: synthetic pretrain. Drive-checkpointed + auto-resume; `cyttic/trocr-hebrew-synthetic` |
 
 ## The dataset and its critical caveat
 
@@ -79,9 +81,11 @@ beam-search eval, CER/WER via jiwer on the `test` split, best model →
 
 ## Environment
 
-- **No system Python has the ML deps.** A project `.venv/` (from `/usr/bin/python3`
-  3.11, with `datasets`+`pillow`) exists for the data tooling only
-  (`to_parquet.py`, `split_dataset.py`). Run those with `.venv/bin/python`.
+- **No system Python has the ML deps.** Use **`/mnt/ssd2/cyttic/ml_env/bin/python`**
+  for all local data tooling — it has the full stack (`datasets`, `pillow`, `cv2`,
+  `scipy`, `numpy`, etc.): `generate_synthetic.py`, `split_synthetic.py`,
+  `split_dataset.py`, `to_parquet.py`. (A thinner project `.venv/` also exists but
+  is missing `cv2`; prefer `ml_env`.)
 - **GPUs:** this Debian box has only an **RTX 2080 Super Max-Q, 8 GB** (Turing →
   **bf16 unsupported**, use `--precision fp16` and expect tight memory). Real
   training runs on a **GCP L4 (24 GB, bf16)** — a ~1.5–3h full run for the human

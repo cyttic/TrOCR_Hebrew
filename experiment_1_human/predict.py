@@ -15,6 +15,7 @@ Usage:
 """
 
 import os
+import sys
 import glob
 import zipfile
 import argparse
@@ -23,6 +24,8 @@ import torch
 from PIL import Image
 from transformers import VisionEncoderDecoderModel, AutoTokenizer
 
+# the shared block_processor.py lives at the repo root
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from block_processor import HebrewBlockProcessor
 
 

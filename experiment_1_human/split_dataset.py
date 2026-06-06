@@ -32,10 +32,11 @@ import random
 import argparse
 from collections import defaultdict
 
-SRC_DIR    = "dataset/human"
+ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR    = os.path.join(ROOT, "dataset/human")
 SRC_IMAGES = os.path.join(SRC_DIR, "images")
 SRC_TSV    = os.path.join(SRC_DIR, "labels.tsv")
-OUT_DIR    = "dataset/human_split"
+OUT_DIR    = os.path.join(ROOT, "dataset/human_split")
 
 DOC_RE = re.compile(r"_line\d+\.png$")
 

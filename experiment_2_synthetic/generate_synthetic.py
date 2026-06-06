@@ -8,7 +8,7 @@ Output:
     └── labels.tsv   — filename → transcript
 
 Usage:
-    python generate_synthetic.py [--count 1000000] [--processes 8]
+    python generate_synthetic.py [--count 1000000] [--processes 8] [--random] [--seed 42]
 """
 
 import os
@@ -22,11 +22,7 @@ from multiprocessing import Value, Lock
 import ctypes
 
 import numpy as np
-from PIL import Image, ImageFont, ImageDraw, ImageFilter, ImageOps
-import cv2
-
-sys.path.insert(0, '/mnt/ssd2/cyttic/projects/handwrittenTextGenerator')
-from image_distortion import apply_random_transform
+from PIL import Image, ImageFont, ImageDraw
 
 # ── paths ────────────────────────────────────────────────────────────────────
 FONTS_DIR      = '/mnt/ssd2/cyttic/projects/fontsVisualizer/fonts'
@@ -76,22 +72,6 @@ def render_line(text, font_path, font_size):
     return img
 
 
-def augment(img):
-    # blur
-    if random.random() < 0.3:
-        r = random.uniform(0.5, 1.5)
-        img = img.filter(ImageFilter.GaussianBlur(radius=r))
-    # distort — convert to grayscale uint8, distort, convert back
-    if random.random() < 0.3:
-        try:
-            gray = np.array(img.convert('L'))
-            distorted, _ = apply_random_transform(gray)
-            img = Image.fromarray(distorted).convert('RGB')
-        except Exception:
-            pass  # skip distortion if it fails for this image
-    return img
-
-
 def generate_batch(fonts, sentences, out_dir,
                    shared_counter, lock, seed):
     random.seed(seed)
@@ -119,8 +99,6 @@ def generate_batch(fonts, sentences, out_dir,
         scaled_w = int(w / h * 64)
         if scaled_w > 2304:
             continue
-
-        img = augment(img)
 
         fname = uuid.uuid4().hex + '.png'
         img.save(os.path.join(out_dir, fname))
@@ -152,8 +130,12 @@ def main(args):
               f"Will generate {len(sentences):,} images only.")
         args.count = len(sentences)
 
-    # Shuffle once, then split evenly across processes — no sentence used twice
-    random.shuffle(sentences)
+    # Pick which sentences to render: a random sample (--random) or the first
+    # --count lines in file order. Either way no sentence is used twice.
+    if args.random:
+        if args.seed is not None:
+            random.seed(args.seed)
+        random.shuffle(sentences)
     sentences = sentences[:args.count]
     chunk_size = math.ceil(len(sentences) / args.processes)
     chunks = [sentences[i * chunk_size:(i + 1) * chunk_size]
@@ -200,4 +182,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--count',     type=int, default=1_000_000)
     parser.add_argument('--processes', type=int, default=8)
+    parser.add_argument('--random',    action='store_true',
+                        help='take a random sample of lines from the source '
+                             '(default: first --count lines in file order)')
+    parser.add_argument('--seed',      type=int, default=None,
+                        help='seed for --random selection (reproducible)')
     main(parser.parse_args())

@@ -1,13 +1,21 @@
 # dataset
 dataset/
 
-# model weights and checkpoints
+# model weights, checkpoints, and saved model directories
 trocr-hebrew-untrained/
+models/
 *.bin
 *.safetensors
 *.pt
 *.pth
 *.ckpt
+
+# archives & heavy binaries
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+*.pdf
 
 # corpus
 hebrew_words.pickle

@@ -1,3 +1,4 @@
+import os
 import sys
 from transformers import VisionEncoderDecoderModel, AutoTokenizer
 from PIL import Image
@@ -5,6 +6,9 @@ import torch
 import cv2
 import numpy as np
 
+# shared block_processor.py and trocr-hebrew-untrained/ live at the repo root
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 from block_processor import HebrewBlockProcessor
 
 if len(sys.argv) < 2:
@@ -15,7 +19,7 @@ image_path = sys.argv[1]
 
 processor = HebrewBlockProcessor()
 tokenizer = AutoTokenizer.from_pretrained("dicta-il/dictabert")
-model = VisionEncoderDecoderModel.from_pretrained("trocr-hebrew-untrained")
+model = VisionEncoderDecoderModel.from_pretrained(os.path.join(ROOT, "trocr-hebrew-untrained"))
 
 model.config.decoder_start_token_id = tokenizer.cls_token_id
 model.config.pad_token_id = tokenizer.pad_token_id

@@ -19,7 +19,8 @@ from PIL import Image
 
 SRC_IMAGES = "/mnt/ssd2/cyttic/datasets/sce_dataset/Dataset_Output/Data/Images"
 SRC_LABELS = "/mnt/ssd2/cyttic/datasets/sce_dataset/Dataset_Output/Data/json_labels"
-OUT_DIR    = "dataset"
+ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT_DIR    = os.path.join(ROOT, "dataset")
 OUT_IMAGES = os.path.join(OUT_DIR, "images")
 OUT_TSV    = os.path.join(OUT_DIR, "labels.tsv")
 

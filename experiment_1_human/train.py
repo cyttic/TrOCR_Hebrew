@@ -24,6 +24,7 @@ Usage:
 """
 
 import os
+import sys
 import argparse
 
 import torch
@@ -37,6 +38,9 @@ from transformers import (
     Seq2SeqTrainingArguments,
 )
 
+# shared block_processor.py and the default output/ dir live at the repo root
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 from block_processor import HebrewBlockProcessor
 
 
@@ -167,7 +171,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--model",       default="cyttic/trocr-hebrew-untrained")
     p.add_argument("--dataset",     default="cyttic/trocr-hebrew-human")
-    p.add_argument("--output-dir",  default="output/trocr-hebrew-human")
+    p.add_argument("--output-dir",  default=os.path.join(ROOT, "output/trocr-hebrew-human"))
     p.add_argument("--epochs",      type=int,   default=10)
     p.add_argument("--max-steps",   type=int,   default=-1)
     p.add_argument("--batch-size",  type=int,   default=8)
