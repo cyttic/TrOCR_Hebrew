@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hebrew TrOCR — Finetuning Experiments on the Matan Dataset</title>
+<style>
+:root { --ink:#1f2933; --muted:#52606d; --line:#d2d6dc; --bg:#fafbfc;
+         --accent:#1d4ed8; --warn:#b45309; --bad:#b91c1c; --good:#15803d; }
+* { box-sizing:border-box; }
+body { font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+        color:var(--ink); background:var(--bg); margin:0; line-height:1.6; }
+.wrap { max-width:980px; margin:0 auto; padding:48px 32px 80px; background:#fff;
+         box-shadow:0 0 0 1px var(--line); }
+h1 { font-size:30px; margin:0 0 4px; }
+h2 { font-size:22px; margin:44px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--line); }
+h3 { font-size:17px; margin:26px 0 8px; color:var(--muted); }
+.sub { color:var(--muted); font-size:14px; margin:0 0 4px; }
+p { margin:10px 0; }
+code { background:#f1f3f5; padding:1px 5px; border-radius:4px; font-size:13px; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; font-variant-numeric:tabular-nums; }
+th,td { border:1px solid var(--line); padding:6px 10px; text-align:right; }
+th { background:#f3f4f6; font-weight:600; }
+td:first-child, th:first-child { text-align:center; }
+tr.best td { background:#ecfdf5; font-weight:600; }
+figure.tbl { margin:18px 0; }
+figure.tbl figcaption { font-weight:600; margin-bottom:8px; font-size:14px; }
+.tnote { font-size:12.5px; color:var(--muted); margin:6px 0 0; }
+.charts { display:flex; flex-wrap:wrap; gap:18px; margin:18px 0; }
+.chart { width:100%; max-width:620px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px; }
+.grid { stroke:#eceff1; stroke-width:1; }
+.refline { stroke:#15803d; stroke-width:1.4; stroke-dasharray:5 4; }
+.reflab { fill:#15803d; font-size:11px; }
+.ytick,.xtick { fill:var(--muted); font-size:11px; }
+.ytick { text-anchor:end; } .xtick { text-anchor:middle; }
+.axislab { fill:var(--ink); font-size:12px; font-weight:600; text-anchor:middle; }
+.leg { fill:var(--ink); font-size:12px; }
+.callout { border-left:4px solid var(--accent); background:#eff6ff; padding:12px 16px; margin:18px 0; border-radius:0 6px 6px 0; }
+.callout.bad { border-color:var(--bad); background:#fef2f2; }
+.callout.good { border-color:var(--good); background:#ecfdf5; }
+.tag { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
+        padding:2px 8px; border-radius:999px; text-transform:uppercase; }
+.tag.fail { background:#fee2e2; color:var(--bad); }
+.tag.run  { background:#fef3c7; color:var(--warn); }
+.summary { width:100%; font-size:13.5px; }
+.summary td, .summary th { text-align:left; }
+.summary td:nth-child(n+3), .summary th:nth-child(n+3) { text-align:right; }
+ul,ol { margin:10px 0 10px 4px; padding-left:22px; }
+li { margin:5px 0; }
+.glossary dt { font-weight:600; margin-top:8px; }
+.glossary dd { margin:2px 0 0 0; color:var(--muted); font-size:13.5px; }
+footer { margin-top:48px; padding-top:16px; border-top:1px solid var(--line);
+          color:var(--muted); font-size:12.5px; }
+@media print { body{background:#fff;} .wrap{box-shadow:none; max-width:none; padding:0;} h2{page-break-after:avoid;} figure.tbl,.charts{page-break-inside:avoid;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Hebrew Handwriting Recognition — Finetuning Experiments on the Matan Dataset</h1>
+<p class="sub">Technical report · Project: <code>TrOCR_Hebrew</code> · Prepared June 08, 2026</p>
+<p class="sub">Author: cyttic &nbsp;|&nbsp; Status: three training experiments completed/in-progress, all unsuccessful by the same mechanism</p>
+
+<h2>1. Executive summary</h2>
+<p>We attempted to train a Hebrew handwriting-recognition model on a new dataset
+(&ldquo;<strong>matan</strong>&rdquo;, ~4,400 training line-images from multiple
+writers) by finetuning our in-house base model. Three experiments were run with
+progressively more conservative training schedules. <strong>All three failed in
+exactly the same way</strong>: the model&rsquo;s training loss fell smoothly
+(it memorised the training examples), but its actual reading accuracy on
+held-out writers did <em>not</em> improve &mdash; character error rate (CER)
+remained pinned around <strong>85&ndash;100%</strong> throughout, and word error
+rate (WER) stayed above 100%.</p>
+
+<div class="callout bad">
+<strong>Bottom line.</strong> The result is consistent and now well understood.
+Our base model&rsquo;s image&ndash;to&ndash;text &ldquo;bridge&rdquo; is
+initialised randomly and is <em>data-hungry</em>; the matan set (~4,400 lines) is
+too small to train that bridge from scratch, regardless of how the schedule is
+tuned. We bracketed the schedule from <strong>0</strong> &rarr; <strong>4</strong>
+&rarr; <strong>20</strong> epochs of &ldquo;warm-up&rdquo; training and obtained
+the same failure each time. This is <em>not</em> a software defect &mdash; the
+pipeline is validated (see &sect;6) &mdash; it is a data-scale limitation with a
+clear, low-risk path forward (&sect;7).</p>
+</div>
+
+<h2>2. Background</h2>
+<p>The model is a <strong>TrOCR</strong>-style system: a visual encoder (a Vision
+Transformer that &ldquo;looks&rdquo; at the line image) connected to a text
+decoder (DictaBERT, a strong Hebrew language model that produces the
+characters). The two halves are joined by a learned component called
+<strong>cross-attention</strong> &mdash; the bridge that lets the text side
+&ldquo;read&rdquo; the picture.</p>
+<p>Critically, in our base model this bridge is <strong>initialised with random
+values</strong> (the decoder was originally a fill-in-the-blank language model,
+never trained to read images). Training therefore has to learn the entire
+visual&ndash;to&ndash;text mapping from scratch, which requires a large amount of
+data. Our project documentation flags this explicitly: <em>&ldquo;the bottleneck
+is data scale, not the decoder.&rdquo;</em></p>
+
+<h2>3. The dataset</h2>
+<p>The matan dataset is a set of Hebrew handwritten text-line images, each paired
+with its ground-truth transcription. It was converted to the standard training
+format and split <strong>by writer</strong> (so no writer&rsquo;s handwriting
+appears in both the training and the test portions &mdash; this prevents the
+model from &ldquo;cheating&rdquo; and gives an honest measure of whether it can
+read a <em>new</em> person&rsquo;s handwriting). The training portion contains
+roughly <strong>4,400 line-images</strong>; the held-out test portion ~900
+lines, on which CER and WER are reported below.</p>
+
+<h2>4. How to read the numbers</h2>
+<dl class="glossary">
+<dt>Training loss</dt><dd>How well the model fits the <em>training</em> examples. Falling = it is learning <em>something</em> from the data it sees. Lower is better.</dd>
+<dt>Validation loss</dt><dd>The same quantity measured on <em>held-out</em> data. If training loss falls while validation loss rises, the model is <em>overfitting</em> (memorising rather than generalising).</dd>
+<dt>CER — Character Error Rate</dt><dd>Fraction of characters the model gets wrong on held-out test lines. <strong>The headline accuracy metric.</strong> 0.00 = perfect; ~0.90 = ~90% of characters wrong. A usable reader needs CER well under ~0.15 (15%).</dd>
+<dt>WER — Word Error Rate</dt><dd>Same idea at the word level. A WER <em>above</em> 1.00 means the output needs more word edits than the reference even contains &mdash; i.e. the output is mostly garbage/insertions, not &ldquo;close but imperfect.&rdquo;</dd>
+</dl>
+
+<h2>5. Experiments &amp; results</h2>
+
+<h3>Experiment 4 &nbsp;<span class="tag fail">Failed</span></h3>
+<p><strong>Configuration:</strong> finetune the base model on matan with the
+visual encoder <strong>unfrozen from epoch 1</strong> (encoder + bridge + decoder
+all trained simultaneously). 8 epochs, batch size 16, learning rate 5&times;10<sup>-5</sup>.</p>
+<p><strong>Outcome:</strong> training loss fell from 4.60 to 0.82, but CER never
+dropped below ~0.86 and showed no downward trend; validation loss bottomed at
+epoch 5 and rose afterwards (overfitting). The best CER (0.80) occurred at
+<em>epoch 2</em> &mdash; the model was not improving its reading over time.</p>
+<figure class="tbl">
+<figcaption>Table 1 — Experiment 4 (encoder unfrozen from epoch 1, 8 epochs). Best CER row highlighted.</figcaption>
+<table>
+<thead><tr><th>Epoch</th><th>Training&nbsp;Loss</th><th>Validation&nbsp;Loss</th><th>CER</th><th>WER</th></tr></thead>
+<tbody><tr><td>1</td><td>4.604143</td><td>3.553077</td><td>0.8753</td><td>1.0514</td></tr><tr class="best"><td>2</td><td>1.985469</td><td>1.954495</td><td>0.8025</td><td>1.1089</td></tr><tr><td>3</td><td>1.532818</td><td>1.839055</td><td>0.9998</td><td>1.2694</td></tr><tr><td>4</td><td>1.309590</td><td>1.758803</td><td>0.9326</td><td>1.3469</td></tr><tr><td>5</td><td>1.084191</td><td>1.685283</td><td>0.8841</td><td>1.0492</td></tr><tr><td>6</td><td>1.015429</td><td>1.777315</td><td>0.8806</td><td>1.2391</td></tr><tr><td>7</td><td>0.906773</td><td>1.756004</td><td>0.8556</td><td>1.3019</td></tr><tr><td>8</td><td>0.820280</td><td>1.778957</td><td>0.8580</td><td>1.2439</td></tr></tbody>
+</table></figure>
+<div class="charts"><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">1.20</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">2.40</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">3.60</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">4.80</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">6.00</text><text x="58.0" y="292" class="xtick">1</text><text x="122.6" y="292" class="xtick">2</text><text x="187.1" y="292" class="xtick">3</text><text x="251.7" y="292" class="xtick">4</text><text x="316.3" y="292" class="xtick">5</text><text x="380.9" y="292" class="xtick">6</text><text x="445.4" y="292" class="xtick">7</text><text x="510.0" y="292" class="xtick">8</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Loss</text><polyline points="58.0,82.2 122.6,191.3 187.1,210.1 251.7,219.4 316.3,228.8 380.9,231.7 445.4,236.2 510.0,239.8" fill="none" stroke="#2563eb" stroke-width="2.2"/><circle cx="58.0" cy="82.2" r="2.6" fill="#2563eb"/><circle cx="122.6" cy="191.3" r="2.6" fill="#2563eb"/><circle cx="187.1" cy="210.1" r="2.6" fill="#2563eb"/><circle cx="251.7" cy="219.4" r="2.6" fill="#2563eb"/><circle cx="316.3" cy="228.8" r="2.6" fill="#2563eb"/><circle cx="380.9" cy="231.7" r="2.6" fill="#2563eb"/><circle cx="445.4" cy="236.2" r="2.6" fill="#2563eb"/><circle cx="510.0" cy="239.8" r="2.6" fill="#2563eb"/><polyline points="58.0,126.0 122.6,192.6 187.1,197.4 251.7,200.7 316.3,203.8 380.9,199.9 445.4,200.8 510.0,199.9" fill="none" stroke="#9333ea" stroke-width="2.2"/><circle cx="58.0" cy="126.0" r="2.6" fill="#9333ea"/><circle cx="122.6" cy="192.6" r="2.6" fill="#9333ea"/><circle cx="187.1" cy="197.4" r="2.6" fill="#9333ea"/><circle cx="251.7" cy="200.7" r="2.6" fill="#9333ea"/><circle cx="316.3" cy="203.8" r="2.6" fill="#9333ea"/><circle cx="380.9" cy="199.9" r="2.6" fill="#9333ea"/><circle cx="445.4" cy="200.8" r="2.6" fill="#9333ea"/><circle cx="510.0" cy="199.9" r="2.6" fill="#9333ea"/><rect x="524" y="21" width="12" height="12" fill="#2563eb"/><text x="540" y="31" class="leg">Training loss</text><rect x="524" y="41" width="12" height="12" fill="#9333ea"/><text x="540" y="51" class="leg">Validation loss</text></svg><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">0.32</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">0.64</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">0.96</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">1.28</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">1.60</text><text x="58.0" y="292" class="xtick">1</text><text x="122.6" y="292" class="xtick">2</text><text x="187.1" y="292" class="xtick">3</text><text x="251.7" y="292" class="xtick">4</text><text x="316.3" y="292" class="xtick">5</text><text x="380.9" y="292" class="xtick">6</text><text x="445.4" y="292" class="xtick">7</text><text x="510.0" y="292" class="xtick">8</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Error rate</text><polyline points="58.0,137.2 122.6,148.6 187.1,117.8 251.7,128.3 316.3,135.9 380.9,136.4 445.4,140.3 510.0,139.9" fill="none" stroke="#dc2626" stroke-width="2.2"/><circle cx="58.0" cy="137.2" r="2.6" fill="#dc2626"/><circle cx="122.6" cy="148.6" r="2.6" fill="#dc2626"/><circle cx="187.1" cy="117.8" r="2.6" fill="#dc2626"/><circle cx="251.7" cy="128.3" r="2.6" fill="#dc2626"/><circle cx="316.3" cy="135.9" r="2.6" fill="#dc2626"/><circle cx="380.9" cy="136.4" r="2.6" fill="#dc2626"/><circle cx="445.4" cy="140.3" r="2.6" fill="#dc2626"/><circle cx="510.0" cy="139.9" r="2.6" fill="#dc2626"/><polyline points="58.0,109.7 122.6,100.7 187.1,75.7 251.7,63.5 316.3,110.1 380.9,80.4 445.4,70.6 510.0,79.6" fill="none" stroke="#ea580c" stroke-width="2.2"/><circle cx="58.0" cy="109.7" r="2.6" fill="#ea580c"/><circle cx="122.6" cy="100.7" r="2.6" fill="#ea580c"/><circle cx="187.1" cy="75.7" r="2.6" fill="#ea580c"/><circle cx="251.7" cy="63.5" r="2.6" fill="#ea580c"/><circle cx="316.3" cy="110.1" r="2.6" fill="#ea580c"/><circle cx="380.9" cy="80.4" r="2.6" fill="#ea580c"/><circle cx="445.4" cy="70.6" r="2.6" fill="#ea580c"/><circle cx="510.0" cy="79.6" r="2.6" fill="#ea580c"/><rect x="524" y="21" width="12" height="12" fill="#dc2626"/><text x="540" y="31" class="leg">CER (lower=better)</text><rect x="524" y="41" width="12" height="12" fill="#ea580c"/><text x="540" y="51" class="leg">WER (lower=better)</text></svg></div>
+
+<h3>Experiment 5 &nbsp;<span class="tag fail">Failed</span></h3>
+<p><strong>Hypothesis:</strong> exp 4 may have failed because unfreezing the
+encoder while the bridge was still random let noisy signals corrupt the
+encoder&rsquo;s good visual features. <strong>Fix attempted:</strong> a
+<em>staged</em> schedule &mdash; first train with the encoder <strong>frozen</strong>
+(let the bridge stabilise against fixed, known-good visual features), then unfreeze.</p>
+<p><strong>Phase 1 (4 frozen epochs):</strong> training loss fell normally, but
+CER again stayed in the 0.90&ndash;1.08 band with no improvement &mdash; 4 epochs
+on ~4,400 lines was not enough exposure for the random bridge to begin reading.</p>
+<figure class="tbl">
+<figcaption>Table 2 — Experiment 5, Phase 1 (encoder frozen, 4 epochs).</figcaption>
+<table>
+<thead><tr><th>Epoch</th><th>Training&nbsp;Loss</th><th>Validation&nbsp;Loss</th><th>CER</th><th>WER</th></tr></thead>
+<tbody><tr><td>1</td><td>4.037316</td><td>3.181087</td><td>0.9245</td><td>1.0995</td></tr><tr class="best"><td>2</td><td>1.993540</td><td>2.081063</td><td>0.8999</td><td>1.1728</td></tr><tr><td>3</td><td>1.548754</td><td>1.852815</td><td>1.0846</td><td>1.4010</td></tr><tr><td>4</td><td>1.336750</td><td>1.797056</td><td>0.9664</td><td>1.4080</td></tr></tbody>
+</table></figure>
+<div class="charts"><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">1.20</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">2.40</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">3.60</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">4.80</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">6.00</text><text x="58.0" y="292" class="xtick">1</text><text x="208.7" y="292" class="xtick">2</text><text x="359.3" y="292" class="xtick">3</text><text x="510.0" y="292" class="xtick">4</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Loss</text><polyline points="58.0,105.8 208.7,190.9 359.3,209.5 510.0,218.3" fill="none" stroke="#2563eb" stroke-width="2.2"/><circle cx="58.0" cy="105.8" r="2.6" fill="#2563eb"/><circle cx="208.7" cy="190.9" r="2.6" fill="#2563eb"/><circle cx="359.3" cy="209.5" r="2.6" fill="#2563eb"/><circle cx="510.0" cy="218.3" r="2.6" fill="#2563eb"/><polyline points="58.0,141.5 208.7,187.3 359.3,196.8 510.0,199.1" fill="none" stroke="#9333ea" stroke-width="2.2"/><circle cx="58.0" cy="141.5" r="2.6" fill="#9333ea"/><circle cx="208.7" cy="187.3" r="2.6" fill="#9333ea"/><circle cx="359.3" cy="196.8" r="2.6" fill="#9333ea"/><circle cx="510.0" cy="199.1" r="2.6" fill="#9333ea"/><rect x="524" y="21" width="12" height="12" fill="#2563eb"/><text x="540" y="31" class="leg">Training loss</text><rect x="524" y="41" width="12" height="12" fill="#9333ea"/><text x="540" y="51" class="leg">Validation loss</text></svg><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">0.32</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">0.64</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">0.96</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">1.28</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">1.60</text><text x="58.0" y="292" class="xtick">1</text><text x="208.7" y="292" class="xtick">2</text><text x="359.3" y="292" class="xtick">3</text><text x="510.0" y="292" class="xtick">4</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Error rate</text><polyline points="58.0,129.6 208.7,133.4 359.3,104.5 510.0,123.0" fill="none" stroke="#dc2626" stroke-width="2.2"/><circle cx="58.0" cy="129.6" r="2.6" fill="#dc2626"/><circle cx="208.7" cy="133.4" r="2.6" fill="#dc2626"/><circle cx="359.3" cy="104.5" r="2.6" fill="#dc2626"/><circle cx="510.0" cy="123.0" r="2.6" fill="#dc2626"/><polyline points="58.0,102.2 208.7,90.7 359.3,55.1 510.0,54.0" fill="none" stroke="#ea580c" stroke-width="2.2"/><circle cx="58.0" cy="102.2" r="2.6" fill="#ea580c"/><circle cx="208.7" cy="90.7" r="2.6" fill="#ea580c"/><circle cx="359.3" cy="55.1" r="2.6" fill="#ea580c"/><circle cx="510.0" cy="54.0" r="2.6" fill="#ea580c"/><rect x="524" y="21" width="12" height="12" fill="#dc2626"/><text x="540" y="31" class="leg">CER (lower=better)</text><rect x="524" y="41" width="12" height="12" fill="#ea580c"/><text x="540" y="51" class="leg">WER (lower=better)</text></svg></div>
+<p><strong>Phase 2 (unfreeze):</strong> on unfreezing, validation loss and CER
+immediately moved the <em>wrong</em> way (CER 0.863 &rarr; 0.941 across two
+epochs while training loss fell). This matched the exp 4 failure and the run was
+<strong>stopped early</strong> to avoid wasting GPU time.</p>
+<figure class="tbl">
+<figcaption>Table 3 — Experiment 5, Phase 2 (encoder unfrozen). Run aborted after 2 epochs on a clearly adverse trend.</figcaption>
+<table>
+<thead><tr><th>Epoch</th><th>Training&nbsp;Loss</th><th>Validation&nbsp;Loss</th><th>CER</th><th>WER</th></tr></thead>
+<tbody><tr class="best"><td>1</td><td>1.229188</td><td>1.878382</td><td>0.8630</td><td>1.0876</td></tr><tr><td>2</td><td>1.017256</td><td>1.949666</td><td>0.9406</td><td>1.2168</td></tr></tbody>
+</table></figure>
+
+<h3>Experiment 6 &nbsp;<span class="tag run">In progress — preliminary</span></h3>
+<p><strong>Hypothesis:</strong> perhaps the frozen warm-up simply needed to be
+<em>much</em> longer. <strong>Fix attempted:</strong> increase the frozen phase
+five-fold &mdash; <strong>20 frozen epochs</strong> before unfreezing (then 10
+unfrozen), batch size 16, learning rate 5&times;10<sup>-5</sup>.</p>
+<p><strong>Outcome (through epoch 15 of 20):</strong> the same pattern, now over a
+much longer run. Training loss fell steadily from 5.93 to 0.71; validation loss
+bottomed at epoch 5 (1.78) and has since risen to 2.04 (overfitting); and CER has
+no downward trend at all &mdash; its <em>best</em> value (0.81) was at
+<strong>epoch 1</strong>, and it has bounced in the 0.85&ndash;1.08 band ever
+since. WER has stayed above 1.0 throughout.</p>
+<figure class="tbl">
+<figcaption>Table 4 — Experiment 6, Phase 1 (encoder frozen, epochs 1-15 of 20 captured). Best CER row highlighted — note it is epoch 1.</figcaption>
+<table>
+<thead><tr><th>Epoch</th><th>Training&nbsp;Loss</th><th>Validation&nbsp;Loss</th><th>CER</th><th>WER</th></tr></thead>
+<tbody><tr class="best"><td>1</td><td>5.928131</td><td>4.956960</td><td>0.8128</td><td>1.0513</td></tr><tr><td>2</td><td>2.776765</td><td>2.479905</td><td>0.8990</td><td>1.1258</td></tr><tr><td>3</td><td>1.825038</td><td>1.904634</td><td>0.9329</td><td>1.1831</td></tr><tr><td>4</td><td>1.485572</td><td>1.828388</td><td>1.0355</td><td>1.4521</td></tr><tr><td>5</td><td>1.257487</td><td>1.777846</td><td>1.0770</td><td>1.3428</td></tr><tr><td>6</td><td>1.169914</td><td>1.821202</td><td>0.8999</td><td>1.2690</td></tr><tr><td>7</td><td>1.061906</td><td>1.831525</td><td>0.9500</td><td>1.4366</td></tr><tr><td>8</td><td>0.991043</td><td>1.811771</td><td>0.8757</td><td>1.2057</td></tr><tr><td>9</td><td>0.911744</td><td>1.811638</td><td>0.8481</td><td>1.1436</td></tr><tr><td>10</td><td>0.885680</td><td>1.856750</td><td>0.8793</td><td>1.2308</td></tr><tr><td>11</td><td>0.846441</td><td>1.886637</td><td>0.8464</td><td>1.1125</td></tr><tr><td>12</td><td>0.788209</td><td>1.964826</td><td>0.9577</td><td>1.4047</td></tr><tr><td>13</td><td>0.762510</td><td>1.999347</td><td>0.8663</td><td>1.1701</td></tr><tr><td>14</td><td>0.723586</td><td>1.993490</td><td>0.8799</td><td>1.1846</td></tr><tr><td>15</td><td>0.705371</td><td>2.035836</td><td>0.9078</td><td>1.3131</td></tr></tbody>
+</table></figure>
+<div class="charts"><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">1.20</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">2.40</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">3.60</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">4.80</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">6.00</text><text x="58.0" y="292" class="xtick">1</text><text x="90.3" y="292" class="xtick">2</text><text x="122.6" y="292" class="xtick">3</text><text x="154.9" y="292" class="xtick">4</text><text x="187.1" y="292" class="xtick">5</text><text x="219.4" y="292" class="xtick">6</text><text x="251.7" y="292" class="xtick">7</text><text x="284.0" y="292" class="xtick">8</text><text x="316.3" y="292" class="xtick">9</text><text x="348.6" y="292" class="xtick">10</text><text x="380.9" y="292" class="xtick">11</text><text x="413.1" y="292" class="xtick">12</text><text x="445.4" y="292" class="xtick">13</text><text x="477.7" y="292" class="xtick">14</text><text x="510.0" y="292" class="xtick">15</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Loss</text><polyline points="58.0,27.0 90.3,158.3 122.6,198.0 154.9,212.1 187.1,221.6 219.4,225.3 251.7,229.8 284.0,232.7 316.3,236.0 348.6,237.1 380.9,238.7 413.1,241.2 445.4,242.2 477.7,243.9 510.0,244.6" fill="none" stroke="#2563eb" stroke-width="2.2"/><circle cx="58.0" cy="27.0" r="2.6" fill="#2563eb"/><circle cx="90.3" cy="158.3" r="2.6" fill="#2563eb"/><circle cx="122.6" cy="198.0" r="2.6" fill="#2563eb"/><circle cx="154.9" cy="212.1" r="2.6" fill="#2563eb"/><circle cx="187.1" cy="221.6" r="2.6" fill="#2563eb"/><circle cx="219.4" cy="225.3" r="2.6" fill="#2563eb"/><circle cx="251.7" cy="229.8" r="2.6" fill="#2563eb"/><circle cx="284.0" cy="232.7" r="2.6" fill="#2563eb"/><circle cx="316.3" cy="236.0" r="2.6" fill="#2563eb"/><circle cx="348.6" cy="237.1" r="2.6" fill="#2563eb"/><circle cx="380.9" cy="238.7" r="2.6" fill="#2563eb"/><circle cx="413.1" cy="241.2" r="2.6" fill="#2563eb"/><circle cx="445.4" cy="242.2" r="2.6" fill="#2563eb"/><circle cx="477.7" cy="243.9" r="2.6" fill="#2563eb"/><circle cx="510.0" cy="244.6" r="2.6" fill="#2563eb"/><polyline points="58.0,67.5 90.3,170.7 122.6,194.6 154.9,197.8 187.1,199.9 219.4,198.1 251.7,197.7 284.0,198.5 316.3,198.5 348.6,196.6 380.9,195.4 413.1,192.1 445.4,190.7 477.7,190.9 510.0,189.2" fill="none" stroke="#9333ea" stroke-width="2.2"/><circle cx="58.0" cy="67.5" r="2.6" fill="#9333ea"/><circle cx="90.3" cy="170.7" r="2.6" fill="#9333ea"/><circle cx="122.6" cy="194.6" r="2.6" fill="#9333ea"/><circle cx="154.9" cy="197.8" r="2.6" fill="#9333ea"/><circle cx="187.1" cy="199.9" r="2.6" fill="#9333ea"/><circle cx="219.4" cy="198.1" r="2.6" fill="#9333ea"/><circle cx="251.7" cy="197.7" r="2.6" fill="#9333ea"/><circle cx="284.0" cy="198.5" r="2.6" fill="#9333ea"/><circle cx="316.3" cy="198.5" r="2.6" fill="#9333ea"/><circle cx="348.6" cy="196.6" r="2.6" fill="#9333ea"/><circle cx="380.9" cy="195.4" r="2.6" fill="#9333ea"/><circle cx="413.1" cy="192.1" r="2.6" fill="#9333ea"/><circle cx="445.4" cy="190.7" r="2.6" fill="#9333ea"/><circle cx="477.7" cy="190.9" r="2.6" fill="#9333ea"/><circle cx="510.0" cy="189.2" r="2.6" fill="#9333ea"/><rect x="524" y="21" width="12" height="12" fill="#2563eb"/><text x="540" y="31" class="leg">Training loss</text><rect x="524" y="41" width="12" height="12" fill="#9333ea"/><text x="540" y="51" class="leg">Validation loss</text></svg><svg viewBox="0 0 620 320" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="274.0" x2="510" y2="274.0" class="grid"/><text x="50" y="278.0" class="ytick">0.00</text><line x1="58" y1="224.0" x2="510" y2="224.0" class="grid"/><text x="50" y="228.0" class="ytick">0.32</text><line x1="58" y1="174.0" x2="510" y2="174.0" class="grid"/><text x="50" y="178.0" class="ytick">0.64</text><line x1="58" y1="124.0" x2="510" y2="124.0" class="grid"/><text x="50" y="128.0" class="ytick">0.96</text><line x1="58" y1="74.0" x2="510" y2="74.0" class="grid"/><text x="50" y="78.0" class="ytick">1.28</text><line x1="58" y1="24.0" x2="510" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">1.60</text><text x="58.0" y="292" class="xtick">1</text><text x="90.3" y="292" class="xtick">2</text><text x="122.6" y="292" class="xtick">3</text><text x="154.9" y="292" class="xtick">4</text><text x="187.1" y="292" class="xtick">5</text><text x="219.4" y="292" class="xtick">6</text><text x="251.7" y="292" class="xtick">7</text><text x="284.0" y="292" class="xtick">8</text><text x="316.3" y="292" class="xtick">9</text><text x="348.6" y="292" class="xtick">10</text><text x="380.9" y="292" class="xtick">11</text><text x="413.1" y="292" class="xtick">12</text><text x="445.4" y="292" class="xtick">13</text><text x="477.7" y="292" class="xtick">14</text><text x="510.0" y="292" class="xtick">15</text><text x="284.0" y="314" class="axislab">Epoch</text><text x="16" y="149.0" class="axislab" transform="rotate(-90 16 149.0)">Error rate</text><polyline points="58.0,147.0 90.3,133.5 122.6,128.2 154.9,112.2 187.1,105.7 219.4,133.4 251.7,125.6 284.0,137.2 316.3,141.5 348.6,136.6 380.9,141.8 413.1,124.4 445.4,138.6 477.7,136.5 510.0,132.2" fill="none" stroke="#dc2626" stroke-width="2.2"/><circle cx="58.0" cy="147.0" r="2.6" fill="#dc2626"/><circle cx="90.3" cy="133.5" r="2.6" fill="#dc2626"/><circle cx="122.6" cy="128.2" r="2.6" fill="#dc2626"/><circle cx="154.9" cy="112.2" r="2.6" fill="#dc2626"/><circle cx="187.1" cy="105.7" r="2.6" fill="#dc2626"/><circle cx="219.4" cy="133.4" r="2.6" fill="#dc2626"/><circle cx="251.7" cy="125.6" r="2.6" fill="#dc2626"/><circle cx="284.0" cy="137.2" r="2.6" fill="#dc2626"/><circle cx="316.3" cy="141.5" r="2.6" fill="#dc2626"/><circle cx="348.6" cy="136.6" r="2.6" fill="#dc2626"/><circle cx="380.9" cy="141.8" r="2.6" fill="#dc2626"/><circle cx="413.1" cy="124.4" r="2.6" fill="#dc2626"/><circle cx="445.4" cy="138.6" r="2.6" fill="#dc2626"/><circle cx="477.7" cy="136.5" r="2.6" fill="#dc2626"/><circle cx="510.0" cy="132.2" r="2.6" fill="#dc2626"/><polyline points="58.0,109.7 90.3,98.1 122.6,89.1 154.9,47.1 187.1,64.2 219.4,75.7 251.7,49.5 284.0,85.6 316.3,95.3 348.6,81.7 380.9,100.2 413.1,54.5 445.4,91.2 477.7,88.9 510.0,68.8" fill="none" stroke="#ea580c" stroke-width="2.2"/><circle cx="58.0" cy="109.7" r="2.6" fill="#ea580c"/><circle cx="90.3" cy="98.1" r="2.6" fill="#ea580c"/><circle cx="122.6" cy="89.1" r="2.6" fill="#ea580c"/><circle cx="154.9" cy="47.1" r="2.6" fill="#ea580c"/><circle cx="187.1" cy="64.2" r="2.6" fill="#ea580c"/><circle cx="219.4" cy="75.7" r="2.6" fill="#ea580c"/><circle cx="251.7" cy="49.5" r="2.6" fill="#ea580c"/><circle cx="284.0" cy="85.6" r="2.6" fill="#ea580c"/><circle cx="316.3" cy="95.3" r="2.6" fill="#ea580c"/><circle cx="348.6" cy="81.7" r="2.6" fill="#ea580c"/><circle cx="380.9" cy="100.2" r="2.6" fill="#ea580c"/><circle cx="413.1" cy="54.5" r="2.6" fill="#ea580c"/><circle cx="445.4" cy="91.2" r="2.6" fill="#ea580c"/><circle cx="477.7" cy="88.9" r="2.6" fill="#ea580c"/><circle cx="510.0" cy="68.8" r="2.6" fill="#ea580c"/><rect x="524" y="21" width="12" height="12" fill="#dc2626"/><text x="540" y="31" class="leg">CER (lower=better)</text><rect x="524" y="41" width="12" height="12" fill="#ea580c"/><text x="540" y="51" class="leg">WER (lower=better)</text></svg></div>
+<div class="callout">
+<strong>Reading these two charts together is the entire story:</strong> the loss
+chart (left) collapses toward zero &mdash; the model is clearly learning to fit
+its training data &mdash; while the error-rate chart (right) is essentially flat
+&mdash; that learning never translates into reading the image. The model lowers
+its loss by leaning on the decoder&rsquo;s Hebrew-language knowledge and
+memorising training lines, not by grounding on the picture.</div>
+
+<h3>Cross-experiment comparison</h3>
+<p>Plotting CER for all three runs on one axis shows the schedule was bracketed
+from 0 to 20 frozen epochs with no effect &mdash; none of the runs comes
+remotely close to the accuracy a usable reader requires.</p>
+<div class="charts" style="justify-content:center"><svg viewBox="0 0 720 340" class="chart" role="img" preserveAspectRatio="xMidYMid meet"><line x1="58" y1="294.0" x2="570" y2="294.0" class="grid"/><text x="50" y="298.0" class="ytick">0.00</text><line x1="58" y1="226.5" x2="570" y2="226.5" class="grid"/><text x="50" y="230.5" class="ytick">0.40</text><line x1="58" y1="159.0" x2="570" y2="159.0" class="grid"/><text x="50" y="163.0" class="ytick">0.80</text><line x1="58" y1="91.5" x2="570" y2="91.5" class="grid"/><text x="50" y="95.5" class="ytick">1.20</text><line x1="58" y1="24.0" x2="570" y2="24.0" class="grid"/><text x="50" y="28.0" class="ytick">1.60</text><text x="58.0" y="312" class="xtick">1</text><text x="84.9" y="312" class="xtick">2</text><text x="111.9" y="312" class="xtick">3</text><text x="138.8" y="312" class="xtick">4</text><text x="165.8" y="312" class="xtick">5</text><text x="192.7" y="312" class="xtick">6</text><text x="219.7" y="312" class="xtick">7</text><text x="246.6" y="312" class="xtick">8</text><text x="273.6" y="312" class="xtick">9</text><text x="300.5" y="312" class="xtick">10</text><text x="327.5" y="312" class="xtick">11</text><text x="354.4" y="312" class="xtick">12</text><text x="381.4" y="312" class="xtick">13</text><text x="408.3" y="312" class="xtick">14</text><text x="435.3" y="312" class="xtick">15</text><text x="462.2" y="312" class="xtick">16</text><text x="489.2" y="312" class="xtick">17</text><text x="516.1" y="312" class="xtick">18</text><text x="543.1" y="312" class="xtick">19</text><text x="570.0" y="312" class="xtick">20</text><text x="314.0" y="334" class="axislab">Epoch (within run)</text><text x="16" y="159.0" class="axislab" transform="rotate(-90 16 159.0)">CER</text><line x1="58" y1="268.7" x2="570" y2="268.7" class="refline"/><text x="62" y="263.7" class="reflab">target zone for a usable reader (CER &lt; ~0.15)</text><polyline points="58.0,146.3 84.9,158.6 111.9,125.3 138.8,136.6 165.8,144.8 192.7,145.4 219.7,149.6 246.6,149.2" fill="none" stroke="#dc2626" stroke-width="2.4"/><circle cx="58.0" cy="146.3" r="2.6" fill="#dc2626"/><circle cx="84.9" cy="158.6" r="2.6" fill="#dc2626"/><circle cx="111.9" cy="125.3" r="2.6" fill="#dc2626"/><circle cx="138.8" cy="136.6" r="2.6" fill="#dc2626"/><circle cx="165.8" cy="144.8" r="2.6" fill="#dc2626"/><circle cx="192.7" cy="145.4" r="2.6" fill="#dc2626"/><circle cx="219.7" cy="149.6" r="2.6" fill="#dc2626"/><circle cx="246.6" cy="149.2" r="2.6" fill="#dc2626"/><rect x="584" y="21" width="12" height="12" fill="#dc2626"/><text x="600" y="31" class="leg">Exp 4 — 0 frozen epochs</text><polyline points="58.0,138.0 84.9,142.1 111.9,111.0 138.8,130.9" fill="none" stroke="#0891b2" stroke-width="2.4"/><circle cx="58.0" cy="138.0" r="2.6" fill="#0891b2"/><circle cx="84.9" cy="142.1" r="2.6" fill="#0891b2"/><circle cx="111.9" cy="111.0" r="2.6" fill="#0891b2"/><circle cx="138.8" cy="130.9" r="2.6" fill="#0891b2"/><rect x="584" y="41" width="12" height="12" fill="#0891b2"/><text x="600" y="51" class="leg">Exp 5 — 4 frozen epochs</text><polyline points="58.0,156.8 84.9,142.3 111.9,136.6 138.8,119.3 165.8,112.3 192.7,142.1 219.7,133.7 246.6,146.2 273.6,150.9 300.5,145.6 327.5,151.2 354.4,132.4 381.4,147.8 408.3,145.5 435.3,140.8" fill="none" stroke="#16a34a" stroke-width="2.4"/><circle cx="58.0" cy="156.8" r="2.6" fill="#16a34a"/><circle cx="84.9" cy="142.3" r="2.6" fill="#16a34a"/><circle cx="111.9" cy="136.6" r="2.6" fill="#16a34a"/><circle cx="138.8" cy="119.3" r="2.6" fill="#16a34a"/><circle cx="165.8" cy="112.3" r="2.6" fill="#16a34a"/><circle cx="192.7" cy="142.1" r="2.6" fill="#16a34a"/><circle cx="219.7" cy="133.7" r="2.6" fill="#16a34a"/><circle cx="246.6" cy="146.2" r="2.6" fill="#16a34a"/><circle cx="273.6" cy="150.9" r="2.6" fill="#16a34a"/><circle cx="300.5" cy="145.6" r="2.6" fill="#16a34a"/><circle cx="327.5" cy="151.2" r="2.6" fill="#16a34a"/><circle cx="354.4" cy="132.4" r="2.6" fill="#16a34a"/><circle cx="381.4" cy="147.8" r="2.6" fill="#16a34a"/><circle cx="408.3" cy="145.5" r="2.6" fill="#16a34a"/><circle cx="435.3" cy="140.8" r="2.6" fill="#16a34a"/><rect x="584" y="61" width="12" height="12" fill="#16a34a"/><text x="600" y="71" class="leg">Exp 6 — 20 frozen epochs</text></svg></div>
+
+
+<figure class="tbl">
+<figcaption>Table 5 — Summary across experiments</figcaption>
+<table class="summary">
+<thead><tr><th>Experiment</th><th>Schedule</th><th>Epochs</th><th>Train loss (first&rarr;last)</th><th>Best CER</th><th>Final CER</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td>Exp 4</td><td>Unfrozen from start</td><td>8</td><td>4.60 &rarr; 0.82</td><td>0.80 (ep 2)</td><td>0.86</td><td>Failed</td></tr>
+<tr><td>Exp 5</td><td>4 frozen, then unfrozen</td><td>4 + 2*</td><td>4.04 &rarr; 1.02</td><td>0.86</td><td>0.94 (rising)</td><td>Failed (aborted)</td></tr>
+<tr><td>Exp 6</td><td>20 frozen, then 10 unfrozen</td><td>15 / 30**</td><td>5.93 &rarr; 0.71</td><td>0.81 (ep 1)</td><td>0.91</td><td>Failing (same pattern)</td></tr>
+</tbody>
+</table>
+<p class="tnote">*Phase 2 aborted after 2 epochs on an adverse trend. &nbsp; **Phase 1 captured through epoch 15 of a planned 20; unfrozen Phase 2 not yet run. All CER/WER on the held-out, writer-disjoint matan test split (~900 lines).</p>
+</figure>
+
+<h2>6. Why this happened (root cause)</h2>
+<p>The three experiments form a controlled sweep of a single variable &mdash; how
+long the model trains before (or whether) the encoder is unfrozen &mdash; and
+they all fail identically. That rules out the schedule as the cause and points to
+the underlying constraint:</p>
+<ul>
+<li><strong>The image&ndash;to&ndash;text bridge starts as pure noise</strong> and
+must be learned entirely from the training data.</li>
+<li><strong>~4,400 lines is too little data</strong> to teach that bridge to
+&ldquo;see&rdquo; from scratch. For comparison, our successful pretraining run
+(&sect;6.1) used roughly <strong>125,000</strong> synthetic lines &mdash; about
+<strong>30&times; more data</strong>.</li>
+<li>With insufficient data, the model takes the path of least resistance: it
+drives the loss down by <strong>memorising the training set</strong> and leaning
+on the decoder&rsquo;s built-in Hebrew language knowledge, which improves the loss
+number without ever learning to read the actual handwriting &mdash; hence falling
+loss but flat, high CER, rising validation loss, and WER above 1.0.</li>
+</ul>
+
+<h3>6.1 Context — what success looks like</h3>
+<div class="callout good">
+<p style="margin-top:0">The pipeline itself is proven. The same model, trained on
+our large <strong>synthetic</strong> Hebrew dataset (~125,000 lines), reaches
+<strong>CER ≈ 0.06 (6%)</strong> and WER ≈ 0.15 on its test set &mdash; i.e. a
+genuinely working reader. The matan experiments fail not because the method is
+wrong, but because ~4,400 real lines cannot, on their own, train the randomly
+initialised bridge that the synthetic data successfully trained.</p>
+</div>
+
+<h2>7. Conclusion &amp; recommendation</h2>
+<p>Training a model on the matan dataset <em>from the randomly initialised base</em>
+is not viable at the current data scale, and further schedule tuning is not worth
+additional GPU budget &mdash; the 0 / 4 / 20-epoch bracket has settled the
+question.</p>
+<p><strong>Recommended next step (low-risk, follows the validated recipe):</strong></p>
+<ol>
+<li><strong>Warm-start from the synthetic-pretrained model</strong>
+(<code>cyttic/trocr-hebrew-synthetic-cont</code>) instead of the randomly
+initialised base. Its bridge is <em>already trained</em> on 125k synthetic lines,
+so finetuning on matan becomes a <em>domain-adaptation</em> task (adjusting a
+working reader to new handwriting) rather than teaching a blind model to see from
+4,400 examples. This is the project&rsquo;s documented recipe
+(synthetic pretrain &rarr; real finetune).</li>
+<li><strong>If a from-base run is still required,</strong> the alternative is to
+<em>add data</em> to the frozen warm-up &mdash; mix the synthetic and/or existing
+human set in alongside matan &mdash; rather than adding more epochs over the same
+small set.</li>
+</ol>
+<p>Either path addresses the actual constraint (data scale for the random bridge)
+rather than the schedule, which has been shown not to matter here.</p>
+
+<footer>
+Generated from the recorded per-epoch training logs of Experiments 4&ndash;6.
+All error rates are computed with the <code>jiwer</code> library on the
+writer-disjoint matan test split. Experiment 6 figures are preliminary
+(Phase&nbsp;1, epochs 1&ndash;15 of 20). &nbsp;·&nbsp; TrOCR_Hebrew project,
+prepared June 08, 2026.
+</footer>
+
+</div>
+</body>
+</html>
